@@ -111,7 +111,7 @@ static void get_first_word(char *source, char **dest)
 static int is_type(char *str)
 {
 	char *types[] = {"void", "char", "struct", "int", "float",
-			"double", "long", "enum", "static"};
+			"double", "long", "enum"};
 	int res, i;
 	for(res = 0, i = 0; !res && str && *str &&
 			(i < sizeof(types) / sizeof(char*)); i++)
@@ -173,7 +173,7 @@ static void read_function_head(int file, char **dest)
 	(*dest)[length] = EOS_CHAR;
 }
 
-int header_read_all(int file, struct header_list *list)
+int header_read_global(int file, struct header_list *list)
 {
 	char buf[READ_STRING_SIZE], *tmp_str;
 	int saved_pos = lseek(file, 0, SEEK_CUR), state;

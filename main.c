@@ -1,70 +1,54 @@
 #include <stdio.h>
 #include <fcntl.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include "header.h"
+#include "string.h"
+#include "file.h"
 
+#define ARG_COUNT_ERR_MSG "Invalid argument count; --help for more info"
 
-#ifdef DEBUG
+enum {
+	MIN_ARG_COUNT = 2,
+	ARG_COUNT_ERR_CODE = 1,
+	FILE_OPEN_ERR_CODE = 2,
+	FILE_DATA_ERR_CODE = 3
+};
+
 int main(int argc, char **argv)
 {
 	struct header_list list;
+	char *name;
 	header_list_init(&list);
-	if(argc < 2)
-		return 1;
+	if(argc < MIN_ARG_COUNT)
+	{
+		fprintf(stderr, "%s\n", ARG_COUNT_ERR_MSG);
+		return ARG_COUNT_ERR_CODE;
+	}
 	int file = open(argv[1], O_RDONLY);
 	if(file == -1)
-		return 2;
-	int state = header_read_all(file, &list);
+	{
+		perror(argv[1]);
+		return FILE_OPEN_ERR_CODE;
+	}
+	int state = header_read_global(file, &list);
 	if(state != HEADER_READ_OK)
 	{
 		printf("HEADER READ ERR\n");
-		return state;
+		return FILE_DATA_ERR_CODE;
 	}
-	struct header_item *current = list.first;
-	for(; current; current = current->next)
-	{
-		printf("%s\n", current->str);
-	}
-	printf("_________________________\n");
-	header_clear_locals(&list);
-	/* struct header_item */ current = list.first;
-	for(; current; current = current->next)
-	{
-		printf("%s\n", current->str);
-	}
-	return 0;
-}
-#else
-int main(int argc, char **argv)
-{
-	/* Argument error handler */
+	string_get_name(argv[1], &name);
 
-	/* File opening + error handler; result in 'file' */
-
-	/* Reading all unit's headers + error handling */
-	struct fposition_type pos_err;
-	int success = header_read_all(src_file, &headers);
-	if(success != HEADER_READ_OK)
+	int dest_file = open(name, O_WRONLY|O_CREAT|O_EXCL, 0666);
+	if(dest_file == -1)
 	{
-		header_print_err_log(success, pos);
-		close(src_file);
-		exit(InfoReadingErrCode);
+		perror(argv[1]);
+		return FILE_OPEN_ERR_CODE;
 	}
-	/* Getting all global ?(may other)? headers of units */
-	success = header_clear_locals(&headers);
-
-	/* Writing in file selected headers + error handling */
-	success = file_write_headers(headers);
-	if(success != FILE_WRITE_OK)
-	{
-		file_print_err_log(success);
-		close(src_file);
-		exit(FileWritingErrCode);
-	}
-
-	/* Closing files, printing? all special info */
-	close(src_file);
+	file_init(dest_file, argv[1]);
+	file_append_headers(dest_file, list);
+	file_end(dest_file);
 	close(dest_file);
-
 	return 0;
 }
-#endif

@@ -19,7 +19,7 @@ enum {
 };
 
 void header_list_init(struct header_list *list);
-int header_read_all(int file, struct header_list *list);
+int header_read_global(int file, struct header_list *list);
 void header_clear_locals(struct header_list *list);
 
 #endif
