@@ -1,54 +1,107 @@
 #include <stdio.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <fcntl.h>
-#include <fcntl.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include "header.h"
-#include "string.h"
-#include "file.h"
+#include <stdlib.h>
 
-#define ARG_COUNT_ERR_MSG "Invalid argument count; --help for more info"
+#include "masker.h"
+#include "argument.h"
+#include "output.h"
+
+#define ARG_ERR_MSG "No arguments detected; please specify source" \
+			" and destination file (the last with -o)"
+#define OUTPUT_FILE_SPEC_ERR_MSG "No output file specified;" \
+					"set it by -o param"
+#define SOURCE_FILE_SPEC_ERR_MSG "No source file specified"
 
 enum {
-	MIN_ARG_COUNT = 2,
-	ARG_COUNT_ERR_CODE = 1,
-	FILE_OPEN_ERR_CODE = 2,
-	FILE_DATA_ERR_CODE = 3
+	FILE_SPEC_ERR = 1,
+	FILE_OPEN_ERR, FSTAT_ERR, MMAP_ERR
 };
 
 int main(int argc, char **argv)
 {
-	struct header_list list;
-	char *name;
-	header_list_init(&list);
-	if(argc < MIN_ARG_COUNT)
+	struct stat output_file_stat, source_file_stat;
+	int output_file, source_file, state, size;
+	char *output_file_name, *output_file_mmap;
+	char *source_file_name, *source_file_mmap;
+	char *headers, *copy_zone_saved, *copy_zone;
+	if(argc == 1)
 	{
-		fprintf(stderr, "%s\n", ARG_COUNT_ERR_MSG);
-		return ARG_COUNT_ERR_CODE;
+		printf("%s\n", ARG_ERR_MSG);
+		return FILE_SPEC_ERR;
 	}
-	int file = open(argv[1], O_RDONLY);
-	if(file == -1)
+	arg_pop_param(argv, &output_file_name, ARG_OUTPUT_SPEC);
+	if(!output_file_name)
 	{
-		perror(argv[1]);
-		return FILE_OPEN_ERR_CODE;
+		printf("%s\n", OUTPUT_FILE_SPEC_ERR_MSG);
+		return FILE_SPEC_ERR;
 	}
-	int state = header_read_global(file, &list);
-	if(state != HEADER_READ_OK)
+	arg_pop_param(argv, &source_file_name, ARG_FREE_SPEC);
+	if(!source_file_name)
 	{
-		printf("HEADER READ ERR\n");
-		return FILE_DATA_ERR_CODE;
+		printf("%s\n", SOURCE_FILE_SPEC_ERR_MSG);
+		return FILE_SPEC_ERR;
 	}
-	string_get_name(argv[1], &name);
+	source_file = open(source_file_name, O_RDONLY);
+	if(source_file == -1)
+	{
+		perror(source_file_name);
+		return FILE_OPEN_ERR;
+	}
+	output_file = open(output_file_name, O_RDWR | O_CREAT, 0666);
+	if(output_file == -1)
+	{
+		perror(output_file_name);
+		return FILE_OPEN_ERR;
+	}
+	state = fstat(output_file, &output_file_stat);
+	if(state != 0)
+	{
+		perror(output_file_name);
+		return FSTAT_ERR;
+	}
+	state = fstat(source_file, &source_file_stat);
+	if(state != 0)
+	{
+		perror(source_file_name);
+		return FSTAT_ERR;
+	}
+	size = ((output_file_stat.st_size - 1) / getpagesize() + 1)
+						* getpagesize();
+	output_file_mmap = mmap(NULL, size, PROT_READ,
+					MAP_PRIVATE, output_file, 0);
+	if(output_file_mmap == (void *)(-1))
+	{
+		perror(output_file_name);
+		return MMAP_ERR;
+	}
+	if(output_file_stat.st_size)
+		read_copy_zone(output_file_mmap, &copy_zone_saved);
+	munmap(output_file_mmap, size);
 
-	int dest_file = open(name, O_WRONLY|O_CREAT|O_EXCL, 0666);
-	if(dest_file == -1)
+	size = ((source_file_stat.st_size - 1) / getpagesize() + 1)
+						* getpagesize();
+	source_file_mmap = mmap(NULL, size, PROT_READ | PROT_WRITE,
+					MAP_PRIVATE, source_file, 0);
+	if(source_file_mmap == (void *)(-1))
 	{
-		perror(argv[1]);
-		return FILE_OPEN_ERR_CODE;
+		perror(source_file_name);
+		return MMAP_ERR;
 	}
-	file_init(dest_file, argv[1]);
-	file_append_headers(dest_file, list);
-	file_end(dest_file);
-	close(dest_file);
+	read_copy_zone(source_file_mmap, &copy_zone);
+	mask_copy_zone(source_file_mmap);
+	mask_func_bodies(source_file_mmap);
+	read_func_headers(source_file_mmap, &headers);
+	munmap(source_file_mmap, size);
+
+	output_file_init(output_file, output_file_name);
+	output_file_write(output_file, copy_zone_saved);
+	output_file_write(output_file, copy_zone);
+	output_file_write(output_file, headers);
+	output_file_shutdown(output_file);
+	close(output_file);
+	close(source_file);
 	return 0;
 }

@@ -2,36 +2,84 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include "string.h"
-#include "stdarg.h"
+#include "consts.h"
 
-#define POSTFIX_STR ".h"
-#define POSTFIX_LEN strlen(POSTFIX_STR)
+struct string_item {
+	char *str;
+	struct string_item *next;
+};
 
-static int get_body_name_len(char *src)
+void string_list_init(struct string_list *list)
 {
-	int len;
-	for(len = 0; src && *src; src++, len++)
-		if(*src == DOT_CHAR)
+	list->first = NULL;
+	list->last = NULL;
+}
+
+void string_list_append(struct string_list *list, char *str)
+{
+	struct string_item *tmp = malloc(sizeof(struct string_item));
+	tmp->next = NULL;
+	tmp->str = strdup(str);
+	if(!(list->first))
+		list->first = tmp;
+	else
+		list->last->next = tmp;
+	list->last = tmp;
+}
+
+static void set_sep(char *c, char *sep)
+{
+	switch(*sep)
+	{
+		case STR_SEP_NONE:
+			return;
+		default:
+			strcpy(c, sep);
+	}
+}
+
+void string_list_join(struct string_list list, char **dest, char *sep)
+{
+	*dest = NULL;
+	int pos, len = 0, count;
+	struct string_list cpy = list;
+	for(count = 0; list.first; list.first = list.first->next, count++)
+		len += strlen(list.first->str);
+	switch(*sep)
+	{
+		case STR_SEP_NONE:
+			*dest = malloc(len + 1);
 			break;
-	return len;
-}
-
-void string_get_name(char *src, char **dest)
-{
-	int len = get_body_name_len(src) + POSTFIX_LEN;
-	*dest = malloc(sizeof(char) * (len+1));
-	strncpy(*dest, src, len-POSTFIX_LEN);
-	strcpy(((*dest)+len-POSTFIX_LEN), POSTFIX_STR);
+		default:
+			*dest = malloc(len + strlen(sep) * count + 1);
+			break;
+	}
+	list = cpy;
+	for(pos = 0; list.first; list.first = list.first->next)
+	{
+		strcpy(((*dest)+pos), list.first->str);
+		set_sep(((*dest)+pos+strlen(list.first->str)), sep);
+		pos += sep == STR_SEP_NONE ?
+			strlen(list.first->str) :
+				strlen(list.first->str) + strlen(sep);
+	}
+	len = sep == STR_SEP_NONE ? len : len + strlen(sep) * count;
 	(*dest)[len] = EOS_CHAR;
 }
 
-void string_get_body(char *src, char **dest)
+void string_list_free(struct string_list *list)
 {
-	int len = get_body_name_len(src);
-	*dest = malloc(sizeof(char) * len+1);
-	strncpy(*dest, src, len);
-	(*dest)[len] = EOS_CHAR;
+	struct string_item *tmp;
+	for(; list->first; )
+	{
+		tmp = list->first;
+		list->first = list->first->next;
+		free(tmp->str);
+		free(tmp);
+	}
+	string_list_init(list);
 }
 
 void string_to_upper(char **str)
@@ -39,6 +87,14 @@ void string_to_upper(char **str)
 	char *temp = *str;
 	for(; temp && *temp; temp++)
 		*temp = toupper(*temp);
+}
+
+void string_get_bare_file_name(char *name, char **res)
+{
+	*res = strdup(name);
+	char *pos = strchr(*res, DOT_CHAR);
+	if(pos)
+		*pos = EOS_CHAR;
 }
 
 void string_concatenate(char **dest, ...)
@@ -63,69 +119,18 @@ void string_concatenate(char **dest, ...)
 	(*dest)[len] = EOS_CHAR;
 }
 
-static int is_space(char c)
+void string_get_line(char **src, char **dest)
 {
-	switch(c)
-	{
-		case SPACE_CHAR:
-		case TABUL_CHAR:
-		case EOL_CHAR:
-			return 1;
-		default:
-			return 0;
-	}
-}
-
-static int get_word_len(const char *source)
-{
-	int len;
-	for(len = 0; source && *source; source++, len++)
-		if(is_space(*source))
-			break;
-	return len;
-}
-
-int string_get_word(const char *src, char **dest)
-{
-	int len = get_word_len(src);
-	*dest = malloc(sizeof(char) * (len+ 1));
-	strncpy(*dest, src, len);
-	(*dest)[len] = EOS_CHAR;
-	return len;
-}
-
-void string_clear_spaces(char **str)
-{
-	int len;
-	for(len = 0; str && *str && **str && is_space((*str)[len]); len++)
-	{}
-	*str = (*str)+len;
-}
-
-void string_skip_word(char **str)
-{
-	char *tmp = NULL;
-	string_clear_spaces(str);
-	*str += string_get_word(*str, &tmp);
-	free(tmp);
-}
-
-void string_remove_char(char **str, char c)
-{
-	int i, k;
-	if(!str)
+	*dest = NULL;
+	char *eol = strchr(*src, EOL_CHAR);
+	if(!eol)
 		return;
-	char *tmp = malloc(sizeof(char) * (strlen(*str)+1));
-	for(i = 0, k = 0; *str && (*str)[k]; k++)
-	{
-		if((*str)[k] != c)
-		{
-			tmp[i] = (*str)[k];
-			i++;
-		}
-	}
-	tmp[i] = EOS_CHAR;
-	free(*str);
-	*str = tmp;
+	int len = eol - *src;
+	*dest = malloc(len + 1);
+	strncpy(*dest, *src, len);
+	(*dest)[len] = EOS_CHAR;
+	if(eol == *src)
+		len += 1;
+	*src = *src + len;
 }
 
